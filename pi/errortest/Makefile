@@ -1,12 +1,13 @@
 CFLAGS+=-Wall -Werror
 
 OBJ=\
-	dump.o
+	dump.o crcccitt.o
 
 PROGS=dump
 
 all: $(PROGS)
 
+dump: $(OBJ)
 clean:
 	rm -f $(OBJ) $(PROGS)
 

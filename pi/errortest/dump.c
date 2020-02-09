@@ -12,23 +12,31 @@
 #include <linux/spi/spidev.h>
 #include <sys/ioctl.h>
 
+#include "checksum.h"
+
 static const char *device = "/dev/spidev0.0";
 static uint8_t mode;
 static uint8_t bits = 8;
 //static uint32_t speed = 10000000;
 //static uint32_t speed = 8000000;
-static uint32_t speed = 6000000;
-//static uint32_t speed = 4000000;
+//static uint32_t speed = 6000000;
+static uint32_t speed = 4000000;
 //static uint32_t speed = 1000000;
 //static uint32_t speed =  500000;
 //static uint32_t speed =  250000;
 //static uint32_t speed =  100000;
 //static uint32_t speed =   50000;
-
+//static uint32_t speed = 10;
 static uint16_t delay = 0;
 
 static int spifd;
 
+static uint64_t transferDelay = 2000;
+
+static uint64_t totalTransfers = 0;
+static uint64_t verifiedTransfers = 0;
+static uint64_t totalBytes = 0;
+static uint64_t verifiedBytes = 0;
 
 /**
 * Print a message and exit/abort the program.
@@ -74,14 +82,13 @@ void hexDump(const void *a, unsigned long len, uint32_t addr)
 /**
 ***************************************************************************/
 static void transfer(int fd)
+
 {
 	int ret;
 	uint8_t tx[256];
 	uint8_t rx[256];
-	// This is shitty and bad
-	int pos;
-	for (pos = 0; pos < 256; pos++) {
-		tx[pos] = rand() & 0xFF;
+	for (int i = 0; i < sizeof(tx)/sizeof(tx[0]); i++) {
+		tx[i] = rand();
 	}
 	struct spi_ioc_transfer tr = {
 		.tx_buf = (unsigned long)&tx,
@@ -93,18 +100,27 @@ static void transfer(int fd)
 	};
 
 	ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
-	if (ret < 1)
-		pabort("can't send spi message");
-
-	printf("RX:\n");
-	hexDump(&rx, sizeof(rx), 0);
-	int confirmed = 0;
-	for (pos = 4; pos < 256; pos++) {
-		confirmed += (rx[pos] == tx[pos-4]) ? 1 : 0;
+	// TODO: Short circuit verification logic
+	if (ret < 1) {}
+	
+		//pabort("can't send spi message");
+	totalTransfers += 1;
+	// subtract 4 for the dummy bytes
+	uint64_t packetBytes = (sizeof(rx) - 4) > 0 ? (sizeof(rx) - 4) : 0;
+	// hexDump(tx, sizeof(tx), 0);
+	// hexDump(rx, sizeof(rx), 0);
+	uint64_t packetBytesVerified = 0;
+	for (int i = 4; i < sizeof(rx); i++) {
+		packetBytesVerified += ((uint8_t*) rx)[i] == ((uint8_t*) tx)[i-4];
 	}
-	printf("\n");
-	printf("Confirmed:%d\n", confirmed);
-	usleep(500000);	
+	totalBytes += packetBytes;
+	verifiedBytes += packetBytesVerified;
+	verifiedTransfers += (packetBytes == packetBytesVerified) ? 1 : 0;
+	double roughPacketErrPct = 100.0 * (totalTransfers - verifiedTransfers) / ((double)totalTransfers);
+	double roughByteErrPct = 100.0 * (totalBytes - verifiedBytes) / (double) totalBytes;
+	printf("%llu\t%llu\t%llu\t%llu\t%.3f\t%.3f\n", totalTransfers, verifiedTransfers, totalBytes, verifiedBytes, 
+			roughPacketErrPct, roughByteErrPct);
+	usleep(transferDelay);
 }
 
 /**
